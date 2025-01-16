@@ -1,0 +1,159 @@
+pragma language_version >= 0.13.0;
+
+import CompactStandardLibrary;
+
+include "./ships-checker";
+import ShipsChecker;
+
+export enum GAME_STATE { waitForPlayer2, playing, ended }
+export enum FIELD_STATE { unknown, hit, miss }
+export enum PLAYER { none, player1, player2 }
+
+// public state
+export ledger gameState: Cell<GAME_STATE>;
+export ledger roundCount: Counter;
+export ledger winner: Cell<PLAYER>;
+export ledger player1: Cell<Bytes<32>>; // public hash of the private key + ship positions
+export ledger player2: Cell<Bytes<32>>; // public hash of the private key + ship positions
+
+export ledger gridPlayer1: Map<Uint<32>, FIELD_STATE>; // public known state of the board player 1
+export ledger gridPlayer2: Map<Uint<32>, FIELD_STATE>; // public known state of the board player 2
+export ledger destroyCountPlayer1: Counter; // sunk ships on player1's board
+export ledger destroyCountPlayer2: Counter; // sunk ships on player2's board
+export ledger nextPlayer: Cell<PLAYER>; // next player to take a shot
+export ledger lastShot: Cell<Vector<2, Uint<8>>>; // last shot coordinates
+
+// temporary state
+ledger lastShotWasHit: Cell<Boolean>; // if the last shot was a hit or a miss
+ledger hasShipBeenDestroyed: Cell<Boolean>; // if a ship has been destroyed
+
+constructor() {
+  assert (checkShipPlacementValid(ships())) "Invalid ship placement";
+
+  gameState = GAME_STATE.waitForPlayer2;
+  nextPlayer = PLAYER.none;
+  winner = PLAYER.none;
+  for i = 0 to 100 do {
+    gridPlayer1.insert(i, FIELD_STATE.unknown);
+    gridPlayer2.insert(i, FIELD_STATE.unknown);
+  }
+  player1.write(public_key(local_secret_key(), ships()));
+}
+
+// random secret for the player
+witness local_secret_key(): Bytes<32>;
+
+// ships placed on the game board
+witness ships(): Vector<5, Vector<2, Vector<2, Uint<8>>>>;
+
+
+// player 1 shares the contract address with player 2
+// player 2 then calls this circuit to join the game and immediately shoot for the first time
+export circuit joinGame(targetX: Uint<8>, targetY: Uint<8>): Void {
+  assert (gameState == GAME_STATE.waitForPlayer2) "Can't join game in current game state";
+  assert (checkShipPlacementValid(ships())) "Invalid ship placement";
+
+  player2.write(public_key(local_secret_key(), ships()));
+  gameState.write(GAME_STATE.playing);
+
+  lastShot.write([targetX, targetY]);
+  roundCount.increment(1); // the first round is done because player 2 already took a shot
+  nextPlayer.write(PLAYER.player1);
+}
+
+export circuit shoot(isPlayerOneCalling: Boolean, targetX: Uint<8>, targetY: Uint<8>): Void {
+  assert (gameState == GAME_STATE.playing) "Can't shoot in current game state";
+  assert ((isPlayerOneCalling && nextPlayer == PLAYER.player1)
+            || (!isPlayerOneCalling && nextPlayer == PLAYER.player2)) "Not your turn";
+  assert ((isPlayerOneCalling && player1 == public_key(local_secret_key(), ships())
+            || (!isPlayerOneCalling && player2 == public_key(local_secret_key(), ships())))) "Invalid player signature";
+
+  // check if last shoot was a hit or a miss
+  const lastShotX = lastShot[0];
+  const lastShotY = lastShot[1];
+  lastShotWasHit.write(false);
+
+  for ship in ships() do {
+    const startPositionOfShipX = ship[0][0];
+    const startPositionOfShipY = ship[0][1];
+    const endPositionOfShipX = ship[1][0];
+    const endPositionOfShipY = ship[1][1];
+    hasShipBeenDestroyed.write(true);
+
+    if (lastShotX >= startPositionOfShipX && lastShotX <= endPositionOfShipX
+        && lastShotY >= startPositionOfShipY && lastShotY <= endPositionOfShipY) {
+      // ship was hit
+      if (isPlayerOneCalling) {
+        gridPlayer1.insert(lastShotX * 10 + lastShotY, FIELD_STATE.hit);
+      } else {
+        gridPlayer2.insert(lastShotX * 10 + lastShotY, FIELD_STATE.hit);
+      }
+      lastShotWasHit.write(true);
+
+      // check if ship is destroyed
+      const lengthX = endPositionOfShipX - startPositionOfShipX + 1;
+      const lengthY = endPositionOfShipY - startPositionOfShipY + 1;
+      const length = lengthX == 1 ? lengthY : lengthX;
+
+      for i = 0 to 5 do {
+        if (i < length) {
+          const x = lengthX == 1 ? startPositionOfShipX : startPositionOfShipX + i;
+          const y = lengthY == 1 ? startPositionOfShipY : startPositionOfShipY + i;
+          if (isPlayerOneCalling) {
+            if (gridPlayer1.lookup(x * 10 + y) == FIELD_STATE.unknown) {
+              hasShipBeenDestroyed.write(false);
+            }
+          } else {
+            if (gridPlayer2.lookup(x * 10 + y) == FIELD_STATE.unknown) {
+              hasShipBeenDestroyed.write(false);
+            }
+          }
+        }
+      }
+
+      if (hasShipBeenDestroyed.read()) {
+        if (isPlayerOneCalling) {
+          destroyCountPlayer1.increment(1);
+        } else {
+          destroyCountPlayer2.increment(1);
+        }
+      }
+    }
+  }
+
+  // shoot was a miss
+  if (lastShotWasHit.read() == false) {
+    if (isPlayerOneCalling) {
+      gridPlayer1.insert(lastShotX * 10 + lastShotY, FIELD_STATE.miss);
+    } else {
+      gridPlayer2.insert(lastShotX * 10 + lastShotY, FIELD_STATE.miss);
+    }
+  }
+
+  // set next shoot coordinates
+  lastShot.write([targetX, targetY]);
+
+  nextPlayer.write(isPlayerOneCalling ? PLAYER.player2 : PLAYER.player1);
+  roundCount.increment(1);
+
+  // check if game is over
+  const NUMBER_OF_SHIPS = 5;
+  if (destroyCountPlayer1.read() >= NUMBER_OF_SHIPS) {
+    winner.write(PLAYER.player2);
+    gameState.write(GAME_STATE.ended);
+  } else if (destroyCountPlayer2.read() >= NUMBER_OF_SHIPS) {
+    winner.write(PLAYER.player1);
+    gameState.write(GAME_STATE.ended);
+  }
+}
+
+// calculate the public key for a player from the board data and the secret key
+// used when the contract is executed by other circuits, can't be called directly
+export pure circuit public_key(secret_key: Bytes<32>, ships: Vector<5, Vector<2, Vector<2, Uint<8>>>>): Bytes<32> {
+  return persistent_hash<Vector<2, Bytes<32>>>(
+    [
+      secret_key,
+      persistent_hash<Vector<5, Vector<2, Vector<2, Uint<8>>>>>(ships)
+    ]
+  );
+}

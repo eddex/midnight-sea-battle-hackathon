@@ -1,0 +1,4 @@
+/contract/
+*.html
+/build/
+/coverage/

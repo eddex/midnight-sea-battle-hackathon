@@ -1,0 +1,92 @@
+{
+  "circuits": [
+    {
+      "name": "joinGame",
+      "pure": false,
+      "arguments": [
+        {
+          "name": "targetX",
+          "type": {
+            "type-name": "Uint",
+            "maxval": 255
+          }
+        },
+        {
+          "name": "targetY",
+          "type": {
+            "type-name": "Uint",
+            "maxval": 255
+          }
+        }
+      ],
+      "result-type": {
+        "type-name": "Void"
+      }
+    },
+    {
+      "name": "shoot",
+      "pure": false,
+      "arguments": [
+        {
+          "name": "isPlayerOneCalling",
+          "type": {
+            "type-name": "Boolean"
+          }
+        },
+        {
+          "name": "targetX",
+          "type": {
+            "type-name": "Uint",
+            "maxval": 255
+          }
+        },
+        {
+          "name": "targetY",
+          "type": {
+            "type-name": "Uint",
+            "maxval": 255
+          }
+        }
+      ],
+      "result-type": {
+        "type-name": "Void"
+      }
+    },
+    {
+      "name": "public_key",
+      "pure": true,
+      "arguments": [
+        {
+          "name": "secret_key",
+          "type": {
+            "type-name": "Bytes",
+            "length": 32
+          }
+        },
+        {
+          "name": "ships",
+          "type": {
+            "type-name": "Vector",
+            "length": 5,
+            "type": {
+              "type-name": "Vector",
+              "length": 2,
+              "type": {
+                "type-name": "Vector",
+                "length": 2,
+                "type": {
+                  "type-name": "Uint",
+                  "maxval": 255
+                }
+              }
+            }
+          }
+        }
+      ],
+      "result-type": {
+        "type-name": "Bytes",
+        "length": 32
+      }
+    }
+  ]
+}

@@ -1,0 +1,104 @@
+// temp state
+ledger hasAllShipsPlaced: Map<Uint<8>, Boolean>; // if all ships are placed correctly
+ledger isValidSize: Cell<Boolean>; // to check if the size is one of the valid ones
+ledger alreadyOccupied: Cell<Boolean>; // if a ship is already placed on a field
+
+// Module where the code is contained to check if the given ships are
+// placed withing the rules of the game.
+module ShipsChecker {
+  // checks if the own ships are placed within the rules of the game
+  export circuit checkShipPlacementValid(ships: Vector<5, Vector<2, Vector<2, Uint<8>>>>): Boolean {
+    // reset validation state of all ships
+    for i = 0 to 5 do {
+      hasAllShipsPlaced.insert(i, false);
+    }
+
+    for ship in ships do {
+      // check if ship is placed within the board
+      if (!isShipFullyInsideBoard(ship)) {
+        return false;
+      }
+      // check size of ship
+      const startPositionOfShipX = ship[0][0];
+      const startPositionOfShipY = ship[0][1];
+      const endPositionOfShipX = ship[1][0];
+      const endPositionOfShipY = ship[1][1];
+
+      const lengthX = endPositionOfShipX - startPositionOfShipX + 1;
+      const lengthY = endPositionOfShipY - startPositionOfShipY + 1;
+      const length = lengthX == 1 ? lengthY : lengthX;
+
+      isValidSize.write(false);
+      for i = 0 to 5 do {
+        const expectedLenght = i == 0 ? 5 : i == 1 ? 4 : i == 2 || i == 3 ? 3 : 2;
+        if (length == expectedLenght && !hasAllShipsPlaced.lookup(i)) {
+          hasAllShipsPlaced.insert(i, true);
+          isValidSize.write(true);
+        }
+      }
+
+      // ship does not have a valid size
+      if (!isValidSize.read()) {
+        return false;
+      }
+
+      // check if ship is placed in a straight line
+      if (!((lengthX == 1 && lengthY != 1) || (lengthY == 1 && lengthY != 1))) {
+        return false;
+      }
+    }
+
+    // check if all ships are placed
+    for i = 0 to 5 do {
+      if (!hasAllShipsPlaced.lookup(i)) {
+        return false;
+      }
+    }
+
+    return areShipsNotOverlappingOptimized(ships);
+  }
+
+  // checks if the ship is placed fully inside the board
+  pure circuit isShipFullyInsideBoard(ship: Vector<2, Vector<2, Uint<8>>>): Boolean {
+    if (ship[0][0] >= 10 || ship[0][1] >= 10) {
+      // start is places outside of the board
+      return false;
+    }
+    if (ship[1][0] >= 10 || ship[1][1] >= 10) {
+      // end is placed outside of the board
+      return false;
+    }
+    return true;
+  }
+
+  // checks if the ships are not overlapping. This is an optimized version for 5 ships, because otherwise
+  // the complexity of the circuit would be too high.
+  circuit areShipsNotOverlappingOptimized(ships: Vector<5, Vector<2, Vector<2, Uint<8>>>>): Boolean {
+    if (shipOverlapping(ships[0], ships[1]) || shipOverlapping(ships[0], ships[2]) || shipOverlapping(ships[0], ships[3])
+        || shipOverlapping(ships[0], ships[4]) || shipOverlapping(ships[1], ships[2]) || shipOverlapping(ships[1], ships[3])
+        || shipOverlapping(ships[1], ships[4]) || shipOverlapping(ships[2], ships[3]) || shipOverlapping(ships[2], ships[4])
+        || shipOverlapping(ships[3], ships[4])) {
+      return false;
+    }
+    return true;
+  }
+
+  // checks if the two given ships are overlapping
+  pure circuit shipOverlapping(ship1: Vector<2, Vector<2, Uint<8>>>, ship2: Vector<2, Vector<2, Uint<8>>>): Boolean {
+    const startPositionOfShipX = ship1[0][0];
+    const startPositionOfShipY = ship1[0][1];
+    const endPositionOfShipX = ship1[1][0];
+    const endPositionOfShipY = ship1[1][1];
+
+    const otherStartPositionOfShipX = ship2[0][0];
+    const otherStartPositionOfShipY = ship2[0][1];
+    const otherEndPositionOfShipX = ship2[1][0];
+    const otherEndPositionOfShipY = ship2[1][1];
+
+    if (startPositionOfShipX >= otherStartPositionOfShipX && startPositionOfShipX <= otherEndPositionOfShipX
+        && startPositionOfShipY >= otherStartPositionOfShipY && startPositionOfShipY <= otherEndPositionOfShipY) {
+      return true;
+    }
+    return false;
+  }
+}
